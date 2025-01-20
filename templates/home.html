@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Manager</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        /* Style for Logout button in top-right corner */
+        .container {
+            position: relative;
+        }
+        #logout-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 10;
+        }
+
+        /* Styling for the clickable text link */
+        .add-task-link {
+            color: blue;
+            text-decoration: underline;
+            cursor: pointer;
+            margin-left: 20px;
+        }
+
+        /* Styling for Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5); /* Background overlay */
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            width: 500px;
+        }
+        .modal-footer {
+            text-align: right;
+        }
+        #no-tasks-prompt {
+            display: none;
+            text-align: center;
+            font-size: 24px; /* Increase font size */
+            font-weight: bold;
+            margin-top: 50px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Your Tasks <span id="add-task-link" class="add-task-link">+ Add New Task</span></h2>
+        <button id="logout-btn">Logout</button>
+
+        <!-- Task List -->
+        <div id="task-list"></div>
+        
+        <!-- No tasks prompt -->
+        <div id="no-tasks-prompt" style="display: none;">
+            <p>No tasks available. <span id="add-task-link-again" class="add-task-link">Click here to create a task.</span></p>
+        </div>
+
+        <!-- Add New Task Modal (Pop-up) -->
+        <div id="createTaskModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Create New Task</h3>
+                </div>
+                <div class="modal-body">
+                    <form id="create-task-form">
+                        <label for="new-task-title">Title</label>
+                        <input type="text" id="new-task-title" name="title" placeholder="Enter task title" required>
+
+                        <label for="new-task-description">Description</label>
+                        <textarea id="new-task-description" name="description" placeholder="Enter task description" required></textarea>
+
+                        <label for="new-task-status">Status</label>
+                        <select id="new-task-status" name="status" required>
+                            <option value="0">Pending</option>
+                            <option value="1">Completed</option>
+                        </select>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" id="create-task-btn">Create Task</button>
+                    <button type="button" id="close-create-task-modal">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Edit Task Modal (Existing Modal) -->
+        <div id="editModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Edit Task</h3>
+                </div>
+                <div class="modal-body">
+                    <form id="edit-task-form">
+                        <label for="taskTitle">Title</label>
+                        <input type="text" id="taskTitle" name="title" required>
+
+                        <label for="taskDescription">Description</label>
+                        <textarea id="taskDescription" name="description" required></textarea>
+
+                        <label for="taskStatus">Status</label>
+                        <select id="taskStatus" name="status" required>
+                            <option value="0">Pending</option>
+                            <option value="1">Completed</option>
+                        </select>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" id="save-edit-btn">Save</button>
+                    <button type="button" id="close-modal-btn">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Logout functionality
+        document.getElementById("logout-btn").addEventListener("click", function() {
+            localStorage.removeItem("access_token");
+            window.location.href = "/login";
+        });
+
+        // Fetch and display tasks
+        function fetchTasks() {
+            const token = localStorage.getItem("access_token");
+            if (!token) {
+                window.location.href = "/login";
+                return;
+            }
+
+            fetch("/tasks", {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                const taskList = document.getElementById("task-list");
+                const noTasksPrompt = document.getElementById("no-tasks-prompt");
+                taskList.innerHTML = "";
+
+                if (data.length === 0) {
+                    noTasksPrompt.style.display = "block";  // Show the prompt if there are no tasks
+                } else {
+                    noTasksPrompt.style.display = "none";  // Hide the prompt if there are tasks
+                    data.forEach(task => {
+                        const taskElement = document.createElement("div");
+                        taskElement.classList.add("task");
+                        taskElement.innerHTML = `
+                            <p><strong>Title</strong>: ${task.title}</p>
+                            <p><strong>Description</strong>: ${task.description}</p>
+                            <p><strong>Status</strong>: ${task.completed ? "Completed" : "Pending"}</p>
+                            <button class="delete-btn" data-task-id="${task.id}">Delete</button>
+                            <button class="edit-btn" data-task-id="${task.id}">Edit</button>
+                        `;
+                        taskElement.setAttribute("data-task", JSON.stringify(task)); // Store the entire task in the element
+                        taskList.appendChild(taskElement);
+                    });
+                }
+
+                // Attach event listeners to delete and edit buttons
+                document.querySelectorAll(".delete-btn").forEach(button => {
+                    button.addEventListener("click", function() {
+                        const taskId = button.getAttribute("data-task-id");
+                        deleteTask(taskId);
+                    });
+                });
+
+                document.querySelectorAll(".edit-btn").forEach(button => {
+                    button.addEventListener("click", function() {
+                        const task = JSON.parse(button.closest(".task").getAttribute("data-task"));
+                        editTask(task); // Pass the entire task object
+                    });
+                });
+            });
+        }
+
+        // Show modal for adding new task
+        document.getElementById("add-task-link").addEventListener("click", function() {
+            document.getElementById("createTaskModal").style.display = "flex"; // Show the modal
+        });
+
+        // Show modal for adding new task (from prompt link)
+        document.getElementById("add-task-link-again").addEventListener("click", function() {
+            document.getElementById("createTaskModal").style.display = "flex"; // Show the modal
+        });
+
+        // Close the Add Task modal
+        document.getElementById("close-create-task-modal").addEventListener("click", function() {
+            document.getElementById("createTaskModal").style.display = "none"; // Close the modal
+        });
+
+        // Handle creating a new task
+        document.getElementById("create-task-btn").addEventListener("click", function() {
+            const token = localStorage.getItem("access_token");
+            if (!token) {
+                window.location.href = "/login";
+                return;
+            }
+
+            const title = document.getElementById("new-task-title").value;
+            const description = document.getElementById("new-task-description").value;
+            const status = document.getElementById("new-task-status").value;
+
+            fetch("/tasks", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${token}`
+                },
+                body: JSON.stringify({ title, description, completed: status === '1' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message === "Task added successfully") {
+                    document.getElementById("createTaskModal").style.display = "none"; // Close modal
+                    fetchTasks();  // Reload the task list
+                    alert("Task added successfully!");
+                } else {
+                    alert("Failed to add task. Please try again.");
+                }
+            });
+        });
+
+        // Delete task with confirmation
+        function deleteTask(taskId) {
+            const confirmation = confirm("Do you want to permanently delete this task?");
+            if (confirmation) {
+                const token = localStorage.getItem("access_token");
+                fetch(`/tasks/${taskId}`, {
+                    method: "DELETE",
+                    headers: {
+                        "Authorization": `Bearer ${token}`
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.message === "Task deleted successfully") {
+                        fetchTasks();  // Reload the task list
+                        alert("Successfully deleted the task.");
+                    } else {
+                        alert("Failed to delete task. Please try again.");
+                    }
+                });
+            }
+        }
+
+        // Edit task (using modal)
+        function editTask(task) {
+            document.getElementById("taskTitle").value = task.title;
+            document.getElementById("taskDescription").value = task.description;
+            document.getElementById("taskStatus").value = task.completed ? 1 : 0; // Set status dropdown value (0 for Pending, 1 for Completed)
+
+            // Show the modal
+            document.getElementById("editModal").style.display = "flex";
+
+            // Remove any previous event listener to prevent multiple triggers
+            const saveButton = document.getElementById("save-edit-btn");
+            const saveHandler = function() {
+                handleSaveClick(task); // Pass the task object to handleSaveClick function
+
+                // After handling the save, remove the event listener
+                saveButton.removeEventListener("click", saveHandler);
+            };
+
+            // Add new listener for Save button
+            saveButton.addEventListener("click", saveHandler);
+        }
+
+        // Handle saving task changes
+        function handleSaveClick(task) {
+            const updatedTitle = document.getElementById("taskTitle").value;
+            const updatedDescription = document.getElementById("taskDescription").value;
+            const updatedStatus = document.getElementById("taskStatus").value;
+
+            fetch(`/tasks/${task.id}`, {
+                method: "PUT",
+                headers: {
+                    'Content-Type': 'application/json',
+                    "Authorization": `Bearer ${localStorage.getItem("access_token")}`
+                },
+                body: JSON.stringify({
+                    title: updatedTitle,
+                    description: updatedDescription,
+                    completed: updatedStatus == 1  // Convert status to boolean
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message === "Task updated successfully") {
+                    document.getElementById("editModal").style.display = "none"; // Close modal
+                    fetchTasks();  // Reload the task list
+                    alert("Task updated successfully!");
+                } else {
+                    alert("Failed to update task. Please try again.");
+                }
+            })
+            .catch(error => {
+                console.error("Error updating task:", error);
+                alert("An error occurred. Please try again later.");
+            });
+        }
+
+        // Close modal when "Close" button is clicked
+        document.getElementById("close-modal-btn").addEventListener("click", function() {
+            document.getElementById("editModal").style.display = "none";
+        });
+
+        // Call fetchTasks when the DOM content is fully loaded
+        document.addEventListener("DOMContentLoaded", fetchTasks);
+    </script>
+</body>
+</html>
